@@ -58,6 +58,26 @@ func main() {
 
 
 	// TODO: POST   /tasks
+
+	api.Post("/tasks", func(c fiber.Ctx) error {
+		var task Task
+		
+		if err := c.Bind().JSON(&task); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "cannot parse JSON"})
+		}
+
+		task.ID = nextID
+		if task.Status == "" {
+			task.Status = "pending"
+		}
+
+		tasks[nextID] = task
+		nextID++
+
+		return c.Status(fiber.StatusCreated).JSON(task)
+	})
+
+
 	// TODO: PUT    /tasks/:id
 	// TODO: DELETE /tasks/:id
 
