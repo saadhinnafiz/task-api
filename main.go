@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"strconv"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/logger"
@@ -37,6 +38,25 @@ func main() {
 	})
 
 	// TODO: GET    /tasks/:id
+
+	api.Get("/tasks/:id", func(c fiber.Ctx) error {
+		idStr := c.Params("id")
+
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid id"})
+	}
+	task, ok := tasks[id]
+	if !ok {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "task not found"})
+	}
+		return c.JSON(task)
+	})
+
+
+
+
+
 	// TODO: POST   /tasks
 	// TODO: PUT    /tasks/:id
 	// TODO: DELETE /tasks/:id
