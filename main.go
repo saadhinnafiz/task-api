@@ -53,7 +53,7 @@ func main() {
 	})
 
 	// POST route for /tasks
-
+	
 	api.Post("/tasks", func(c fiber.Ctx) error {
 		var task Task
 		
@@ -108,7 +108,27 @@ func main() {
         return c.JSON(existingTask)
     })
 
-	// TODO: DELETE /tasks/:id
+	// add DELETE /tasks/:id
+
+	// 1. Get the ID from the URL
+	api.Delete("/tasks/:id", func(c fiber.Ctx) error {
+		idStr := c.Params("id")
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error":"invalid id"})
+		}
+		// 2. Check if the task exists in the map
+
+		if _, exists := tasks[id]; !exists{
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error":"task not found"})
+		}
+
+		// 3. Delete it from the memory map
+		delete(tasks,id)
+		
+		return c.SendStatus(fiber.StatusNoContent)
+	})
+
 
 	log.Fatal(app.Listen(":3000"))
 }
