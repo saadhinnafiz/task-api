@@ -37,31 +37,27 @@ func main() {
 		return c.JSON(list)
 	})
 
-	// TODO: GET    /tasks/:id
+	// GET route for /tasks/:id
 
-	api.Get("/tasks/:id", func(c fiber.Ctx) error {
+	api.Get("/tasks/:id", func (c fiber.Ctx) error  {
 		idStr := c.Params("id")
-
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid id"})
-	}
-	task, ok := tasks[id]
-	if !ok {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "task not found"})
-	}
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error":"invalid id"})
+		}
+		task, ok := tasks[id]
+		if !ok {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "task not found"})
+		}
 		return c.JSON(task)
 	})
 
-
-
-
-
-	// TODO: POST   /tasks
+	// POST route for /tasks
 
 	api.Post("/tasks", func(c fiber.Ctx) error {
 		var task Task
 		
+		// create an empty task box, and tell Fiber to read the incoming JSON text and put it inside that box.
 		if err := c.Bind().JSON(&task); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "cannot parse JSON"})
 		}
@@ -78,7 +74,40 @@ func main() {
 	})
 
 
-	// TODO: PUT    /tasks/:id
+	// PUT route for /tasks/:id
+
+	api.Put("/tasks/:id", func(c fiber.Ctx) error {
+        // 1. Get the ID from the URL
+        idStr := c.Params("id")
+        id, err := strconv.Atoi(idStr)
+        if err != nil {
+            return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid id"})
+        }
+
+        // 2. Check if the task already exists
+        existingTask, exists := tasks[id]
+        if !exists {
+            return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "task not found"})
+        }
+
+        // 3. Read the new data from the user
+        var updatedTask Task
+        if err := c.Bind().JSON(&updatedTask); err != nil {
+            return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "cannot parse JSON"})
+        }
+
+        // 4. Overwrite the old fields with the new fields
+        existingTask.Title = updatedTask.Title
+        existingTask.Description = updatedTask.Description
+        existingTask.Status = updatedTask.Status
+        existingTask.AssignedTo = updatedTask.AssignedTo
+
+        // 5. Save it back to the map
+        tasks[id] = existingTask
+
+        return c.JSON(existingTask)
+    })
+
 	// TODO: DELETE /tasks/:id
 
 	log.Fatal(app.Listen(":3000"))
