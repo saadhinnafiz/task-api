@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"strconv"
 
@@ -16,119 +17,126 @@ type Task struct {
 	AssignedTo  int    `json:"assigned_to"`
 }
 
-// temporary in-memory storage — Postgres replaces this in phase 2
-var tasks = map[int]Task{
-	1: {ID: 1, Title: "Set up database", Status: "pending", AssignedTo: 1},
-	2: {ID: 2, Title: "Write auth middleware", Status: "in_progress", AssignedTo: 1},
-}
-var nextID = 3
-
 func main() {
+	connectDB()
+	defer db.Close()
+
 	app := fiber.New()
 	app.Use(logger.New())
 
 	api := app.Group("/api")
 
+	// GET /tasks — Fetch all from Postgres
 	api.Get("/tasks", func(c fiber.Ctx) error {
-		list := make([]Task, 0, len(tasks))
-		for _, t := range tasks {
+		rows, err := db.Query(context.Background(), "SELECT id, title, description, status, assigned_to FROM tasks")
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		defer rows.Close()
+
+		var list []Task
+		for rows.Next() {
+			var t Task
+			if err := rows.Scan(&t.ID, &t.Title, &t.Description, &t.Status, &t.AssignedTo); err != nil {
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+			}
 			list = append(list, t)
 		}
+
+		if list == nil {
+			list = []Task{} // return empty array instead of null if table is empty
+		}
+
 		return c.JSON(list)
 	})
 
-	// GET route for /tasks/:id
-
-	api.Get("/tasks/:id", func (c fiber.Ctx) error  {
+	// GET /tasks/:id — Fetch a single task by ID
+	api.Get("/tasks/:id", func(c fiber.Ctx) error {
 		idStr := c.Params("id")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error":"invalid id"})
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid id"})
 		}
-		task, ok := tasks[id]
-		if !ok {
+
+		var t Task
+		query := "SELECT id, title, description, status, assigned_to FROM tasks WHERE id = $1"
+		err = db.QueryRow(context.Background(), query, id).Scan(&t.ID, &t.Title, &t.Description, &t.Status, &t.AssignedTo)
+		if err != nil {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "task not found"})
 		}
-		return c.JSON(task)
+
+		return c.JSON(t)
 	})
 
-	// POST route for /tasks
-	
+	// POST /tasks — Insert into Postgres
 	api.Post("/tasks", func(c fiber.Ctx) error {
 		var task Task
-		
-		// create an empty task box, and tell Fiber to read the incoming JSON text and put it inside that box.
 		if err := c.Bind().JSON(&task); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "cannot parse JSON"})
 		}
 
-		task.ID = nextID
 		if task.Status == "" {
 			task.Status = "pending"
 		}
 
-		tasks[nextID] = task
-		nextID++
+		query := `INSERT INTO tasks (title, description, status, assigned_to) 
+		          VALUES ($1, $2, $3, $4) 
+		          RETURNING id, title, description, status, assigned_to`
 
-		return c.Status(fiber.StatusCreated).JSON(task)
+		var created Task
+		err := db.QueryRow(context.Background(), query, task.Title, task.Description, task.Status, task.AssignedTo).
+			Scan(&created.ID, &created.Title, &created.Description, &created.Status, &created.AssignedTo)
+
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.Status(fiber.StatusCreated).JSON(created)
 	})
 
-
-	// PUT route for /tasks/:id
-
+	// PUT /tasks/:id — Update in Postgres
 	api.Put("/tasks/:id", func(c fiber.Ctx) error {
-        // 1. Get the ID from the URL
-        idStr := c.Params("id")
-        id, err := strconv.Atoi(idStr)
-        if err != nil {
-            return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid id"})
-        }
+		idStr := c.Params("id")
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid id"})
+		}
 
-        // 2. Check if the task already exists
-        existingTask, exists := tasks[id]
-        if !exists {
-            return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "task not found"})
-        }
+		var updated Task
+		if err := c.Bind().JSON(&updated); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "cannot parse JSON"})
+		}
 
-        // 3. Read the new data from the user
-        var updatedTask Task
-        if err := c.Bind().JSON(&updatedTask); err != nil {
-            return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "cannot parse JSON"})
-        }
+		query := `UPDATE tasks SET title = $1, description = $2, status = $3, assigned_to = $4 
+		          WHERE id = $5 
+		          RETURNING id, title, description, status, assigned_to`
 
-        // 4. Overwrite the old fields with the new fields
-        existingTask.Title = updatedTask.Title
-        existingTask.Description = updatedTask.Description
-        existingTask.Status = updatedTask.Status
-        existingTask.AssignedTo = updatedTask.AssignedTo
+		var saved Task
+		err = db.QueryRow(context.Background(), query, updated.Title, updated.Description, updated.Status, updated.AssignedTo, id).
+			Scan(&saved.ID, &saved.Title, &saved.Description, &saved.Status, &saved.AssignedTo)
 
-        // 5. Save it back to the map
-        tasks[id] = existingTask
+		if err != nil {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "task not found or update failed"})
+		}
 
-        return c.JSON(existingTask)
-    })
+		return c.JSON(saved)
+	})
 
-	// add DELETE /tasks/:id
-
-	// 1. Get the ID from the URL
+	// DELETE /tasks/:id — Delete from Postgres
 	api.Delete("/tasks/:id", func(c fiber.Ctx) error {
 		idStr := c.Params("id")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error":"invalid id"})
-		}
-		// 2. Check if the task exists in the map
-
-		if _, exists := tasks[id]; !exists{
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error":"task not found"})
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid id"})
 		}
 
-		// 3. Delete it from the memory map
-		delete(tasks,id)
-		
+		result, err := db.Exec(context.Background(), "DELETE FROM tasks WHERE id = $1", id)
+		if err != nil || result.RowsAffected() == 0 {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "task not found"})
+		}
+
 		return c.SendStatus(fiber.StatusNoContent)
 	})
-
 
 	log.Fatal(app.Listen(":3000"))
 }
